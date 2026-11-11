@@ -64,4 +64,11 @@ Real-time sensor integration
 IoT-based energy monitoring
 Automatic appliance monitoring
 Monthly energy reports
+## Dashboard Preview
 
+The dashboard provides:
+- Total energy consumption
+- Estimated electricity bill
+- Appliance-wise consumption chart
+- Daily energy monitoring
+- High consumption alerts
