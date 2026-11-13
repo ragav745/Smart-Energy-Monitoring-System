@@ -1,7 +1,11 @@
- 
-import streamlit as st
-import pandas as pd
+
 import os
+import pandas as pd
+import streamlit as st
+import matplotlib.pyplot as plt
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FILE_NAME = os.path.join(BASE_DIR, "energy_data.csv")
 
 st.set_page_config(
     page_title="Smart Energy Monitoring",
@@ -9,6 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
+# Dashboard styling
 st.markdown("""
 <style>
 .stApp {
@@ -34,69 +39,185 @@ st.sidebar.title("⚡ Energy Monitor")
 st.sidebar.write("Dashboard Navigation")
 st.sidebar.info("Monitor electricity usage and estimated cost.")
 
-file_name = "energy_data.csv"
+# Load CSV
+@st.cache_data
+def load_data():
+    if not os.path.exists(FILE_NAME):
+        return pd.DataFrame()
 
-if os.path.exists(file_name):
-    df = pd.read_csv(file_name)
+    df = pd.read_csv(FILE_NAME)
+    df.columns = df.columns.str.strip()
 
-    if not df.empty and {"Date", "Appliance", "Energy"}.issubset(df.columns):
+    required = [
+        "Date", "Appliance", "Energy_kWh", "Bill_Rs"
+    ]
 
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df["Energy"] = pd.to_numeric(df["Energy"], errors="coerce")
-        df = df.dropna(subset=["Date", "Energy"])
+    if not all(column in df.columns for column in required):
+        return pd.DataFrame()
 
-        if not df.empty:
-            tariff = st.sidebar.number_input(
-                "Tariff (Rs/unit)", min_value=0.0, value=8.0
-            )
-            limit = st.sidebar.number_input(
-                "Daily alert limit (kWh)", min_value=0.1, value=5.0
-            )
+    df["Date"] = pd.to_datetime(
+        df["Date"], format="mixed", errors="coerce"
+    )
 
-            total_energy = df["Energy"].sum()
-            total_bill = total_energy * tariff
-            total_appliances = df["Appliance"].nunique()
+    df["Energy_kWh"] = pd.to_numeric(
+        df["Energy_kWh"], errors="coerce"
+    )
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("⚡ Total Energy", f"{total_energy:.2f} kWh")
-            c2.metric("💰 Estimated Bill", f"₹{total_bill:.2f}")
-            c3.metric("🔌 Appliances", total_appliances)
+    df["Bill_Rs"] = pd.to_numeric(
+        df["Bill_Rs"], errors="coerce"
+    )
 
-            st.divider()
+    # Combine Fan and fan
+    df["Appliance"] = (
+        df["Appliance"]
+        .astype("string")
+        .str.strip()
+        .str.casefold()
+        .str.title()
+    )
 
-            df["Day"] = df["Date"].dt.date
+    df = df.dropna(
+        subset=["Date", "Appliance", "Energy_kWh", "Bill_Rs"]
+    )
 
-            left, right = st.columns(2)
+    df = df[df["Energy_kWh"] >= 0]
 
-            with left:
-                st.subheader("📈 Daily Energy Consumption")
-                daily = df.groupby("Day")["Energy"].sum()
-                st.line_chart(daily)
+    return df
 
-            with right:
-                st.subheader("🔋 Appliance-wise Usage")
-                appliance = df.groupby("Appliance")["Energy"].sum()
-                st.bar_chart(appliance)
 
-            st.divider()
-            st.subheader("🚨 Energy Usage Alert")
+df = load_data()
 
-            high_usage = daily[daily > limit]
+if df.empty:
+    st.warning("No complete energy readings found.")
+    st.info("Add readings using energy_monitor.py.")
+    st.stop()
 
-            if not high_usage.empty:
-                st.warning("High energy consumption detected!")
-                st.dataframe(high_usage)
-            else:
-                st.success("Energy consumption is within the set limit.")
+# Sidebar filters
+st.sidebar.subheader("Filters")
 
-            st.subheader("📋 Appliance Records")
-            st.dataframe(df, use_container_width=True)
+appliances = sorted(df["Appliance"].unique())
 
-        else:
-            st.warning("No valid energy readings found.")
+selected_appliances = st.sidebar.multiselect(
+    "Select Appliances",
+    appliances,
+    default=appliances
+)
 
-    else:
-        st.warning("CSV file is empty or has an unexpected format.")
+filtered_df = df[
+    df["Appliance"].isin(selected_appliances)
+]
 
+if filtered_df.empty:
+    st.info("Select at least one appliance.")
+    st.stop()
+
+# Summary metrics
+total_energy = filtered_df["Energy_kWh"].sum()
+total_bill = filtered_df["Bill_Rs"].sum()
+total_appliances = filtered_df["Appliance"].nunique()
+total_readings = len(filtered_df)
+
+c1, c2, c3, c4 = st.columns(4)
+
+c1.metric("⚡ Total Energy", f"{total_energy:.2f} kWh")
+c2.metric("💰 Electricity Bill", f"₹{total_bill:.2f}")
+c3.metric("🔌 Appliances", total_appliances)
+c4.metric("📋 Readings", total_readings)
+
+st.divider()
+
+# Consumption charts
+st.subheader("📈 Energy Consumption Analysis")
+
+filtered_df = filtered_df.copy()
+filtered_df["Day"] = filtered_df["Date"].dt.date
+
+daily = filtered_df.groupby("Day")["Energy_kWh"].sum()
+
+appliance_energy = (
+    filtered_df.groupby("Appliance")["Energy_kWh"]
+    .sum()
+    .sort_values(ascending=False)
+)
+
+left, right = st.columns(2)
+
+with left:
+    st.write("**Daily Energy Consumption**")
+    st.line_chart(daily)
+
+with right:
+    st.write("**Appliance-wise Usage**")
+    st.bar_chart(appliance_energy)
+
+st.divider()
+
+# Daily alert
+st.subheader("🚨 Daily Energy Usage Alert")
+
+limit = st.sidebar.number_input(
+    "Daily alert limit (kWh)",
+    min_value=0.1,
+    value=5.0,
+    step=0.5
+)
+
+high_usage = daily[daily > limit]
+
+if not high_usage.empty:
+    st.warning("High daily energy consumption detected!")
+    st.dataframe(high_usage)
 else:
-    st.info("Run data_storage.py to add appliance readings.")
+    st.success("Daily consumption is within the selected limit.")
+
+st.divider()
+
+# Appliance recommendations
+st.subheader("💡 Energy-Saving Recommendations")
+
+if not appliance_energy.empty:
+    highest_name = appliance_energy.index[0]
+    highest_value = appliance_energy.iloc[0]
+
+    st.info(
+        f"Highest-consuming appliance: {highest_name} "
+        f"({highest_value:.2f} kWh)"
+    )
+
+    for name, energy in appliance_energy.items():
+        if energy > 3:
+            st.warning(
+                f"{name}: High recorded consumption. "
+                "Reduce unnecessary operating hours."
+            )
+        else:
+            st.write(
+                f"• {name}: Switch off when not required."
+            )
+
+st.caption(
+    "Recommendations are rule-based and use recorded readings. "
+    "This project does not currently use live sensors."
+)
+
+st.divider()
+
+# Records
+st.subheader("📋 Appliance Records")
+
+st.dataframe(
+    filtered_df.sort_values("Date", ascending=False),
+    use_container_width=True
+)
+
+# Download CSV
+csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    "📥 Download Energy Records",
+    data=csv_data,
+    file_name="energy_records.csv",
+    mime="text/csv"
+)
+
+st.success("Smart Energy Monitoring Dashboard loaded successfully!")
