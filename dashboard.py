@@ -16,7 +16,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Dashboard styling
 st.markdown("""
 <style>
 .stApp {
@@ -42,7 +41,8 @@ st.sidebar.title("⚡ Energy Monitor")
 st.sidebar.write("Dashboard Navigation")
 st.sidebar.info("Monitor electricity usage and estimated cost.")
 
-# Load CSV
+
+# Load data
 @st.cache_data
 def load_data():
 
@@ -52,9 +52,7 @@ def load_data():
     df = pd.read_csv(FILE_NAME)
     df.columns = df.columns.str.strip()
 
-    required = [
-        "Date", "Appliance", "Energy_kWh", "Bill_Rs"
-    ]
+    required = ["Date", "Appliance", "Energy_kWh", "Bill_Rs"]
 
     if not all(column in df.columns for column in required):
         return pd.DataFrame()
@@ -83,8 +81,10 @@ def load_data():
         subset=["Date", "Appliance", "Energy_kWh", "Bill_Rs"]
     )
 
-    df = df[df["Energy_kWh"] >= 0]
-    df = df[df["Bill_Rs"] >= 0]
+    df = df[
+        (df["Energy_kWh"] >= 0) &
+        (df["Bill_Rs"] >= 0)
+    ]
 
     return df
 
@@ -96,7 +96,8 @@ if df.empty:
     st.info("Add readings using energy_monitor.py.")
     st.stop()
 
-# Sidebar filters
+
+# Appliance filter
 st.sidebar.subheader("Filters")
 
 appliances = sorted(df["Appliance"].unique())
@@ -115,13 +116,15 @@ if filtered_df.empty:
     st.info("Select at least one appliance.")
     st.stop()
 
+
 # Summary metrics
 total_energy = filtered_df["Energy_kWh"].sum()
 total_bill = filtered_df["Bill_Rs"].sum()
 total_appliances = filtered_df["Appliance"].nunique()
 total_readings = len(filtered_df)
 
-# Monthly bill prediction
+
+# Monthly prediction
 today = datetime.now()
 
 current_month_data = filtered_df[
@@ -136,10 +139,8 @@ days_in_month = calendar.monthrange(
     today.year, today.month
 )[1]
 
-elapsed_days = today.day
-
 predicted_bill = (
-    monthly_bill / elapsed_days
+    monthly_bill / today.day
 ) * days_in_month
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -151,39 +152,97 @@ c4.metric("📋 Readings", total_readings)
 c5.metric("📅 Predicted Monthly Bill", f"₹{predicted_bill:.2f}")
 
 st.caption(
-    f"Monthly prediction uses {today.strftime('%B %Y')} readings "
-    f"for the selected appliances. Month-to-date bill: "
+    f"Month-to-date bill for {today.strftime('%B %Y')}: "
     f"₹{monthly_bill:.2f}"
 )
 
 st.divider()
 
-# Monthly prediction details
+
+# Monthly bill prediction
 st.subheader("📅 Monthly Electricity Bill Prediction")
 
 col1, col2 = st.columns(2)
 
-with col1:
-    st.metric(
-        "Monthly Energy Consumption",
-        f"{monthly_energy:.2f} kWh"
-    )
+col1.metric(
+    "Monthly Energy Consumption",
+    f"{monthly_energy:.2f} kWh"
+)
 
-with col2:
-    st.metric(
-        "Estimated Month-End Bill",
-        f"₹{predicted_bill:.2f}"
-    )
+col2.metric(
+    "Estimated Month-End Bill",
+    f"₹{predicted_bill:.2f}"
+)
 
 st.info(
-    "Prediction is calculated using the average recorded bill "
-    "per calendar day. It assumes consumption continues at "
-    "the same average rate."
+    "Prediction uses the average recorded bill per calendar day. "
+    "It assumes the average rate continues through the month."
 )
 
 st.divider()
 
-# Consumption charts
+
+# Monthly energy history
+st.subheader("📊 Monthly Energy History")
+
+history_df = filtered_df.copy()
+
+history_df["Month"] = (
+    history_df["Date"].dt.to_period("M").astype(str)
+)
+
+monthly_history = (
+    history_df.groupby("Month")
+    .agg({
+        "Energy_kWh": "sum",
+        "Bill_Rs": "sum"
+    })
+    .sort_index()
+)
+
+if not monthly_history.empty:
+
+    left, right = st.columns(2)
+
+    with left:
+        st.write("**Monthly Energy Consumption (kWh)**")
+        st.bar_chart(monthly_history["Energy_kWh"])
+
+    with right:
+        st.write("**Monthly Electricity Bill (₹)**")
+        st.bar_chart(monthly_history["Bill_Rs"])
+
+    highest_month = monthly_history["Energy_kWh"].idxmax()
+    highest_energy = monthly_history.loc[
+        highest_month, "Energy_kWh"
+    ]
+
+    st.info(
+        f"Highest recorded consumption month: "
+        f"{highest_month} ({highest_energy:.2f} kWh)"
+    )
+
+    st.write("**Monthly Summary**")
+    st.dataframe(
+        monthly_history.rename(columns={
+            "Energy_kWh": "Energy (kWh)",
+            "Bill_Rs": "Bill (₹)"
+        }),
+        use_container_width=True
+    )
+
+else:
+    st.info("Monthly history is not available yet.")
+
+st.caption(
+    "Monthly history uses the readings currently stored in energy_data.csv. "
+    "A month with no readings will not appear."
+)
+
+st.divider()
+
+
+# Daily energy charts
 st.subheader("📈 Energy Consumption Analysis")
 
 filtered_df["Day"] = filtered_df["Date"].dt.date
@@ -208,6 +267,7 @@ with right:
 
 st.divider()
 
+
 # Daily alert
 st.subheader("🚨 Daily Energy Usage Alert")
 
@@ -228,7 +288,8 @@ else:
 
 st.divider()
 
-# Appliance recommendations
+
+# Energy-saving recommendations
 st.subheader("💡 Energy-Saving Recommendations")
 
 if not appliance_energy.empty:
@@ -260,7 +321,8 @@ st.caption(
 
 st.divider()
 
-# Records
+
+# Appliance records
 st.subheader("📋 Appliance Records")
 
 st.dataframe(
@@ -268,7 +330,6 @@ st.dataframe(
     use_container_width=True
 )
 
-# Download CSV
 csv_data = filtered_df.to_csv(index=False).encode("utf-8")
 
 st.download_button(
