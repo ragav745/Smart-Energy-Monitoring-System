@@ -3,33 +3,47 @@ import csv
 import os
 from datetime import datetime
 
-file_name = "energy_data.csv"
+FILE_NAME = "energy_data.csv"
 
-# Check whether CSV file already exists
-file_exists = os.path.exists(file_name)
+FIELDS = [
+    "Date", "Appliance", "V", "Current", "Power",
+    "Hours", "Energy_kWh", "Tariff", "Bill_Rs"
+]
 
-# Get appliance details
-name = input("Enter appliance name: ")
-power = float(input("Enter power (W): "))
-hours = float(input("Enter daily usage (hours): "))
 
-energy = (power * hours) / 1000
+def save_reading(appliance, voltage, current, power,
+                 hours, energy, tariff, bill):
 
-# Save readings
-with open(file_name, "a", newline="") as file:
+    rows = []
 
-    writer = csv.writer(file)
+    # Read existing records so older data is preserved
+    if os.path.exists(FILE_NAME) and os.path.getsize(FILE_NAME) > 0:
+        with open(FILE_NAME, "r", newline="") as file:
+            reader = csv.DictReader(file)
 
-    if not file_exists or os.path.getsize(file_name) == 0:
-        writer.writerow(["Date", "Appliance", "Power", "Hours", "Energy"])
+            for old_row in reader:
+                rows.append({
+                    field: old_row.get(field, "")
+                    for field in FIELDS
+                })
 
-    writer.writerow([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        name,
-        power,
-        hours,
-        energy
-    ])
+    new_row = {
+        "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Appliance": appliance,
+        "V": voltage,
+        "Current": current,
+        "Power": power,
+        "Hours": hours,
+        "Energy_kWh": energy,
+        "Tariff": tariff,
+        "Bill_Rs": bill
+    }
 
-print("Energy reading saved successfully!")
-print("Energy Consumption:", energy, "kWh")
+    rows.append(new_row)
+
+    with open(FILE_NAME, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print("Reading saved successfully!")
