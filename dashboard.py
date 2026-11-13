@@ -1,8 +1,11 @@
 
 import os
+import calendar
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+
+from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILE_NAME = os.path.join(BASE_DIR, "energy_data.csv")
@@ -42,6 +45,7 @@ st.sidebar.info("Monitor electricity usage and estimated cost.")
 # Load CSV
 @st.cache_data
 def load_data():
+
     if not os.path.exists(FILE_NAME):
         return pd.DataFrame()
 
@@ -67,7 +71,6 @@ def load_data():
         df["Bill_Rs"], errors="coerce"
     )
 
-    # Combine Fan and fan
     df["Appliance"] = (
         df["Appliance"]
         .astype("string")
@@ -81,6 +84,7 @@ def load_data():
     )
 
     df = df[df["Energy_kWh"] >= 0]
+    df = df[df["Bill_Rs"] >= 0]
 
     return df
 
@@ -105,7 +109,7 @@ selected_appliances = st.sidebar.multiselect(
 
 filtered_df = df[
     df["Appliance"].isin(selected_appliances)
-]
+].copy()
 
 if filtered_df.empty:
     st.info("Select at least one appliance.")
@@ -117,19 +121,71 @@ total_bill = filtered_df["Bill_Rs"].sum()
 total_appliances = filtered_df["Appliance"].nunique()
 total_readings = len(filtered_df)
 
-c1, c2, c3, c4 = st.columns(4)
+# Monthly bill prediction
+today = datetime.now()
+
+current_month_data = filtered_df[
+    (filtered_df["Date"].dt.month == today.month) &
+    (filtered_df["Date"].dt.year == today.year)
+]
+
+monthly_energy = current_month_data["Energy_kWh"].sum()
+monthly_bill = current_month_data["Bill_Rs"].sum()
+
+days_in_month = calendar.monthrange(
+    today.year, today.month
+)[1]
+
+elapsed_days = today.day
+
+predicted_bill = (
+    monthly_bill / elapsed_days
+) * days_in_month
+
+c1, c2, c3, c4, c5 = st.columns(5)
 
 c1.metric("⚡ Total Energy", f"{total_energy:.2f} kWh")
 c2.metric("💰 Electricity Bill", f"₹{total_bill:.2f}")
 c3.metric("🔌 Appliances", total_appliances)
 c4.metric("📋 Readings", total_readings)
+c5.metric("📅 Predicted Monthly Bill", f"₹{predicted_bill:.2f}")
+
+st.caption(
+    f"Monthly prediction uses {today.strftime('%B %Y')} readings "
+    f"for the selected appliances. Month-to-date bill: "
+    f"₹{monthly_bill:.2f}"
+)
+
+st.divider()
+
+# Monthly prediction details
+st.subheader("📅 Monthly Electricity Bill Prediction")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric(
+        "Monthly Energy Consumption",
+        f"{monthly_energy:.2f} kWh"
+    )
+
+with col2:
+    st.metric(
+        "Estimated Month-End Bill",
+        f"₹{predicted_bill:.2f}"
+    )
+
+st.info(
+    "Prediction is calculated using the average recorded bill "
+    "per calendar day. It assumes consumption continues at "
+    "the same average rate."
+)
 
 st.divider()
 
 # Consumption charts
 st.subheader("📈 Energy Consumption Analysis")
 
-filtered_df = filtered_df.copy()
 filtered_df["Day"] = filtered_df["Date"].dt.date
 
 daily = filtered_df.groupby("Day")["Energy_kWh"].sum()
@@ -176,6 +232,7 @@ st.divider()
 st.subheader("💡 Energy-Saving Recommendations")
 
 if not appliance_energy.empty:
+
     highest_name = appliance_energy.index[0]
     highest_value = appliance_energy.iloc[0]
 
@@ -185,6 +242,7 @@ if not appliance_energy.empty:
     )
 
     for name, energy in appliance_energy.items():
+
         if energy > 3:
             st.warning(
                 f"{name}: High recorded consumption. "
